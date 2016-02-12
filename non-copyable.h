@@ -1,5 +1,4 @@
-The MIT License (MIT)
-
+/**
 Copyright (c) 2016 Mariano Gonzalez
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -19,3 +18,20 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+*/
+
+#ifndef _NON_COPYABLE_H_
+#define _NON_COPYABLE_H_
+
+namespace patterns {
+    class Non_Copyable {
+    public:
+        Non_Copyable(const Non_Copyable&) = delete;
+        Non_Copyable& operator=(const Non_Copyable&) = delete;
+        ~Non_Copyable() = default;
+    protected:
+        Non_Copyable() = default;
+    };
+}
+
+#endif // _NON_COPYABLE_H_
