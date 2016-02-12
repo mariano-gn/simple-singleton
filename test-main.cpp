@@ -37,6 +37,10 @@ protected:
         : m_fp(firstParam)
         , m_sp(secondParam) {}
 
+    ~Test_Singleton() {
+        std::cout << "I'm being destroyed!" << std::endl;
+    }
+
 private:
     int m_fp;
     std::string m_sp;

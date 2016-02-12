@@ -1,11 +1,267 @@
 <a href="#es">Español</a>
 <a id="top"></a>
 <br>
- <!-- Here goes the English version -->
+Hello! New post, this time with code!
+&nbsp;
+Today I bring you 3 things, I actually wanted to bring you something else, but that other thing needed this 3 foundations: 
+<ul>
+    <li>An assert macro that I use, based on the standard assert that allows me to print an specific message when the assertion fails.</li>
+    <li>The non-copyable pattern class, used to prevent something from being copied. As the next one, the pattern works by inheritance, making any class that inherits from it will have its properties.</li>
+    <li>The singleton pattern class. I know singleton abuse is a problem, but the representation is useful sometimes.</li>
+</ul>
+Now, before we move on a couple of disclaimers: 
+<ul>
+    <li>The singleton implementation makes use of <a href="https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern">CRTP</a>, I promise, as with SFINAE, I'll make a couple of post explaining those 2 concepts (as best as I can).</li>
+    <li>This type of singleton has a deterministic time of creation and destruction (as opposed to the traditional singleton that is created the first time it's needed), the cost of this is a bit of boilerplate code to initialize and destroy it. This kind of tradeoff is done mainly because of 3 things:
+        <ul>
+            <li>Determinism: if you're building a game engine, for example, you don't want frame spikes because something unexpected (as the initialization of a heavy object) happened.</li>
+            <li>Parameters and constructors: since there will be an explicit point of creation, you can pass parameters to the initialization function without cluttering any <code>get_instance</code> method or create any ambiguity about parameters for creation and when to use them.</li>
+            <li>Multithreading: Same as with determinism, the initialization can be achieved as the only moment in which a critical section is needed, but any further usage of the instance, since it will be a read only operation (obtaining the instance) can be safely done without no other security mechanism.</li>
+        </ul>
+    </li>
+</ul>
+Disclaimers done, to the code.
+&nbsp;
+<h2>Assert with message</h2>
+[code language="cpp"]
+#ifndef _SIMPLE_ASSERT_H_
+#define _SIMPLE_ASSERT_H_
+#include <cassert>
+    
+#define SPL_ASSERT(exp, message)\
+    assert((exp) && (message))
+
+#define SPL_FALSE_ASSERT(message)\
+    assert(false && (message))
+
+#endif // _SIMPLE_ASSERT_H_
+[/code]
+Appart from include guards and <code>cassert</code> obligatory include, there are just 2 macros, the trick of this is just that when the expression fails, it will show both the expression and the message, otherwise, since a string it's always casted to <code>true</code> the assert works as expected.
+&nbsp;
+The second version just forces the expression to false, so that you can see the message. It's essentially the same as doing <code>assert(!(message))</code>. You can use this version to fail if the code follows a path you know it shouldn't.
+&nbsp;
+<h2>Non-Copyable</h2>
+[code language="cpp"]
+#ifndef _NON_COPYABLE_H_
+#define _NON_COPYABLE_H_
+
+namespace patterns {
+    class Non_Copyable {
+    public:
+        Non_Copyable(const Non_Copyable&) = delete;
+        Non_Copyable& operator=(const Non_Copyable&) = delete;
+        virtual ~Non_Copyable() = default;
+    protected:
+        Non_Copyable() = default;
+    };
+}
+
+#endif // _NON_COPYABLE_H_
+[/code]
+There are objects (like the singleton instance) that you don't want someone else to be able to copy. And you want to fail as fast as possible on that. The simplest way pre-C++11 was to declare the copy ctor & copy assignment private. This is based in the same principle, but using the <code>delete</code> keyword that was introduced with C++11. Also, working as a pattern you only need to make your class inherit from this one and that's it, non-copyable. If you would ever want a non-movable object, it should be the same but using the move constructor and assignment operators instead.
+&nbsp;
+<h2>Singleton</h2>
+This one is the real meat of the article. It's not complicated but still, let's go, step by step:
+[code language="cpp"]
+#ifndef _SINGLETON_H_
+#define _SINGLETON_H_
+
+#include "non-copyable.h"
+#include "simple-assert.h"
+#include <utility>
+
+namespace patterns {
+    template<typename Base_Type>
+    class Singleton : public Non_Copyable {
+[/code]
+Include guards, and also include <code>non-copyable.h</code> and <code>simple-assert.h</code>. The <code>utility</code> header will be used to forward parameters, more on this later. As you can see, it inherits from <code>Non_Copyable</code> and it's a templated class (this is critical to achieve the singleton pattern without caring about the <code>Singleton</code> class).
+[code language="cpp"]
+    protected:
+        Singleton() = default;
+
+    private:
+        static Base_Type* m_pInst;
+[/code]
+The constructor is marked protected, since it only needs to be accessed from the classes inheriting from this pattern. Later, the static instance pointer (so we know it can exist or not, and we don't need to know about it prior to its initialization). Here is where the template appears, since the instance will be of the <code>Base</code> class, not from <code>Singleton</code> (This is why this implementation makes use of CRTP). 
+[code language="cpp"]
+    public:
+        template<typename... Base_Type_Arguments>
+        static void init(Base_Type_Arguments&& ...args) {
+            SPL_ASSERT(!m_pInst, "An instance exists when calling Singleton::init");
+            m_pInst = new Base_Type(std::forward<Base_Type_Arguments>(args)...);
+        }
+[/code]
+Here is something really interesting happening. This is the initialization method used to create the singleton, prior to any usage of it. Appart from the assertion, it makes use of another feature from C++11, 'variadic templates'. On compilation, this will cause that regardless of the constructor of the <code>Base</code> class, the <code>init</code> method will match the number of parameters and will pass them to the constructor. <code>std::forward<T>()</code> is used here to prevent rvalue/lvalue parameter mismatches, incorrect copies and other issues. Essentially making the call to init as an equal call to the base class constructor. 
+[code language="cpp"]
+        static Base_Type& get() {
+            return *getp();
+        }
+
+        static Base_Type* getp() {
+            SPL_ASSERT(m_pInst, "No instance exists when calling Singleton::getp");
+            return m_pInst;
+        }
+
+        static bool exists() {
+            return m_pInst != nullptr;
+        }
+        
+        virtual ~Singleton() {
+            SPL_ASSERT(m_pInst, "No instance exists when calling Singleton::~Singleton");
+            m_pInst = nullptr;
+        }
+
+        static void destroy() {
+            SPL_ASSERT(m_pInst, "No instance exists when calling Singleton::destroy");
+            delete m_pInst;
+        }
+    };
+}
+[/code]
+Assertions here, just for debug purposes :)
+We have <code>get</code> and <code>getp</code> to access the singleton instance, and note the return value being the base class and not <code>Singleton</code>! Even if we inherit from the pattern, it's silently there without interfering with the usage of the real class.
+We also have the <code>exists</code> method, useful to tell if the singleton is already created (since this singleton implementation doesn't have automatic initialization).
+&nbsp;
+Finally the destructor and the <code>destroy</code> function. The destructor doesn't have to do anything but clearing the static instance, since it will no longer contain a valid singleton. The real work, the cleaning, is the <code>destroy</code> static method. Deleting the instance in the destructor makes no sense, since if called it's because the instance is already being deleted.
+[code language="cpp"]
+template <typename Base_Type>
+Base_Type* patterns::Singleton<Base_Type>::m_pInst = nullptr;
+[/code]
+Outside of the class definition, this line just initializes the instance member to null. It's done outside of the <code>Singleton</code> definition to prevent minor annoyances from the compilers, it's the nicest way I find it to work :) (If you have a better one, please leave a comment or even better, a pull request!)
+&nbsp;
+That's all for today. As the last time, <a href="https://github.com/mariano-gn/simple-singleton">here</a> you can find the full source code and an example main file so that you can see how the singleton works in its entirety. Next time, we will put the singleton to work on implementing a Logger for all of your debug needs!
 <br>
 <a href="#top">Back to Top</a>
 <hr>
 <a id="es"></a>
 <br>
-<!-- Acá va la versión en Español -->
+¡Buenas! Nuevo post, ¡esta vez con código!
+&nbsp;
+Hoy traigo 3 cosas, en realidad quería mostrar algo diferente, pero necesito estas 3 cosas como base para lo siguiente.
+<ul>
+    <li>Un macro de assert que uso, basado en el assert estándar que además me permite imprimir un mensaje a consola si el assert falla.</li>
+    <li>Una clase con la implementación del patrón "No copiable", usado para prevenir que algo se copie. Como el siguiente, el patrón funciona a base de herencia, por lo que cualquier clase que herede del patrón adopta sus propiedades.</li>
+    <li>Una clase implementando el patrón Singleton. Sé que abusar de los singletons es un problema, pero aún así son útiles en determinadas ocasiones.</li>
+</ul>
+Antes de seguir, un par de consideraciones: 
+<ul>
+    <li>Esta implementación de singleton usa algo conocido como <a href="https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern">CRTP</a>, prometo que, como con SFINAE, voy a crear un par de artículos explicando ambos conceptos (lo mejor que pueda).</li>
+    <li>Este tipo de singleton tiene una creación y destrucción determinista (en contraposición con el singleton tradicional que se crea en el momento en que se necesita por primera vez), el costo de esto es un poco de código extra para inicializar y destruir el singleton explícitamente. Esto es así por 3 razones:
+        <ul>
+            <li>Determinismo: si, por ejemplo, estás escribiendo un motor de videojuegos, no querés que de la nada tengas saltos en el framerate porque algo inesperado pasó (como la inicialización de un objeto pesado).</li>
+            <li>Parámetros y constructores: como va a existir una inicialización explícita, se pueden pasar los parámetros de inicialización sin 'ensuciar' los 'getters' o crear ambigüedad sobre los parámetros de creación y cuándo usarlos.</li>
+            <li>Multithreading: Del mismo modo que con el determinismo, la inicialización es el único momento donde se puede necesitar proteger una sección crítica, quedando cualquier uso posterior de la instancia (obtenerla) libre de requerir ningún mecanismo de seguridad.</li>
+        </ul>
+    </li>
+</ul>
+Consideraciones hechas, al código.
+&nbsp;
+<h2>Assert con mensaje</h2>
+[code language="cpp"]
+#ifndef _SIMPLE_ASSERT_H_
+#define _SIMPLE_ASSERT_H_
+#include <cassert>
+    
+#define SPL_ASSERT(exp, message)\
+    assert((exp) && (message))
+
+#define SPL_FALSE_ASSERT(message)\
+    assert(false && (message))
+
+#endif // _SIMPLE_ASSERT_H_
+[/code]
+Aparte de las 'include guards' y el include de <code>cassert</code> obligatorio, hay dos macros nada más. El truco de esto es que cuando la expresión falla, se va a imprimir por consola junto con el mensaje, y de otro modo, como un string siempre se castea a <code>true</code> el assert va a funcionar como se espera.
+&nbsp;
+La segunda versión simplemente fuerza la expresión a fallar, para que se imprima el mensaje. Es esencialmente lo mismo que utilizar <code>assert(!(mensaje))</code>. Esta versión se puede utilizar para fallar en caso de que el código siga un camino que no se esperaba que siguiese.
+&nbsp;
+<h2>Non-Copyable</h2>
+[code language="cpp"]
+#ifndef _NON_COPYABLE_H_
+#define _NON_COPYABLE_H_
+
+namespace patterns {
+    class Non_Copyable {
+    public:
+        Non_Copyable(const Non_Copyable&) = delete;
+        Non_Copyable& operator=(const Non_Copyable&) = delete;
+        virtual ~Non_Copyable() = default;
+    protected:
+        Non_Copyable() = default;
+    };
+}
+
+#endif // _NON_COPYABLE_H_
+[/code]
+Hay objetos (como la instancia de un singleton) que nadie debería poder copiar. Y es genial que se pueda fallar lo antes posible en ese intento. La manera más fácil antes de C++11 era declarar el constructor por copia y la asignación por copia privadas. Esta implementación usa el mismo principio pero aprovechando la nueva keyword <code>delete</code> que fue introducida con C++11. Además, funcionando como un patrón, solo se necesita que la clase herede de él y listo, no-copiable. Si uno quisiera un objeto no-movible (C++11) sería lo mismo pero con los operadores de construcción y asignación por movimiento.
+&nbsp;
+<h2>Singleton</h2>
+Acá está la carne del artículo. No es muy complicado pero aún así, paso a paso:
+[code language="cpp"]
+#ifndef _SINGLETON_H_
+#define _SINGLETON_H_
+
+#include "non-copyable.h"
+#include "simple-assert.h"
+#include <utility>
+
+namespace patterns {
+    template<typename Base_Type>
+    class Singleton : public Non_Copyable {
+[/code]
+'Include guards' y la inclusión de <code>non-copyable.h</code> y <code>simple-assert.h</code>. El header <code>utility</code> se va a usar para transferir parámetros, más sobre esto luego. Como se ve, hereda de <code>Non_Copyable</code> y es una clase template (crítico para poder usar el patrón sin que importe la clase <code>Singleton</code>).
+[code language="cpp"]
+    protected:
+        Singleton() = default;
+
+    private:
+        static Base_Type* m_pInst;
+[/code]
+El constructor está marcado como protected, porque solo necesita ser accedido desde las clases que hereden de este patrón. Luego, el puntero a la instancia estática (para saber si existe o no y para que no sea necesario saber del objeto antes de su inicialización). Acá es donde aparece el template, ya que la instancia va a ser del tipo <code>Base</code> y no de <code>Singleton</code> (Y además por esto es que la implementación utiliza CRTP).
+[code language="cpp"]
+    public:
+        template<typename... Base_Type_Arguments>
+        static void init(Base_Type_Arguments&& ...args) {
+            SPL_ASSERT(!m_pInst, "An instance exists when calling Singleton::init");
+            m_pInst = new Base_Type(std::forward<Base_Type_Arguments>(args)...);
+        }
+[/code]
+Acá sí hay algo interesante. Este es el método de inicialización que se usa para crear el singleton, antes de usarlo. Aparte del assert, usa otra característicade C++11, 'variadic templates'. En la compilación, esto va a causar que sin importar el constructor de la clase <code>Base</code>, el método <code>init</code> va a tener el mismo número de parámetros y se los va a pasar al constructor. <code>std::forward<T>()</code> se utiliza para prevenir incompatibilidad de rvalue contra lvalue, copias incorrectas y otros problemas. Esencialmente es lo mismo que realizar la llamada exacta al constructor, en lugar de a <code>init</code>. 
+[code language="cpp"]
+        static Base_Type& get() {
+            return *getp();
+        }
+
+        static Base_Type* getp() {
+            SPL_ASSERT(m_pInst, "No instance exists when calling Singleton::getp");
+            return m_pInst;
+        }
+
+        static bool exists() {
+            return m_pInst != nullptr;
+        }
+        
+        virtual ~Singleton() {
+            SPL_ASSERT(m_pInst, "No instance exists when calling Singleton::~Singleton");
+            m_pInst = nullptr;
+        }
+
+        static void destroy() {
+            SPL_ASSERT(m_pInst, "No instance exists when calling Singleton::destroy");
+            delete m_pInst;
+        }
+    };
+}
+[/code]
+Más asserts, para debug :)
+Tenemos <code>get</code> y <code>getp</code> para acceder a la instancia del singleton y, notar el valor de retorno, que ¡es del tipo de la clase base y no <code>Singleton</code>! Aún si una clase hereda del patrón, éste está allí sin interferir con el uso de esa clase.
+Además tenemos <code>exists</code>, útil para saber si la instancia ya fue creada (dado que este singleton no tiene inicialización automática).
+&nbsp;
+Finalmente el destructor y la función <code>destroy</code>. El destructor no hace más que limpiar la variable estática, que ya no va a apuntar a un objeto válido. El trabajo real, la limpieza, la realiza el método estático <code>destroy</code>. Matar la instancia en el destructor, no tiene sentido ya que si se está ejecutando es porque la instancia ya se está destruyendo.
+[code language="cpp"]
+template <typename Base_Type>
+Base_Type* patterns::Singleton<Base_Type>::m_pInst = nullptr;
+[/code]
+Afuera de la definición de la clase, esta línea simplemente inicializa la variable de la instancia a null. Está hecho afuera de la defninición de <code>Singleton</code> para prevenir algunas molestias menores de los compiladores. Es la mejor forma que encontre para que funcione correctamente. (Si tenés una mejor, por favor dejá un comentario o, mejor aún, ¡un pull request!)
+&nbsp;
+Esto es todo por hoy. Como la vez pasada, <a href="https://github.com/mariano-gn/simple-singleton">acá</a> está el código completo y un ejemplo de uso, para que puedas ver cómo se usa el singleton y cómo funciona en detalle. La próxima, vamos a usar el singleton para implementar un 'logger' ¡para todas tus necesidades de debug!
 <a href="#es">Inicio</a>

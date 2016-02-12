@@ -28,7 +28,7 @@ namespace patterns {
     public:
         Non_Copyable(const Non_Copyable&) = delete;
         Non_Copyable& operator=(const Non_Copyable&) = delete;
-        ~Non_Copyable() = default;
+        virtual ~Non_Copyable() = default;
     protected:
         Non_Copyable() = default;
     };
